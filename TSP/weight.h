@@ -22,28 +22,34 @@ double distEUC(std::vector<double>&u,std::vector<double>&v,int dim){
 
 double distMAN(std::vector<double>&u,std::vector<double>&v,int dim){
     double ret=0;
-    for(int i=0;i<dim;i++)ret+=abs(int(u[i])-int(v[i]));
+    for(int i=0;i<dim;i++)ret+=std::abs(u[i]-v[i]);
     return ret;
 }
 
 double distMAX(std::vector<double>&u,std::vector<double>&v,int dim){
     double ret=0;
-    for(int i=0;i<dim;i++)ret=std::max(ret,double(abs(int(u[i])-int(v[i]))));
+    for(int i=0;i<dim;i++)ret=std::max(ret,std::abs(u[i]-v[i]));
     return ret;
 }
 
-const double PI=3.1415926535897932384626433832795028842;
+// TSPLIB GEO uses this exact (truncated) value of PI, not full precision.
+const double PI=3.141592;
 const double RRR=6378.388;
 
+// Convert a TSPLIB "DDD.MM" coordinate (integer part = degrees, fraction =
+// minutes) to radians, per the TSPLIB spec: PI*(deg + 5*min/3)/180.
+static double geoRad(double x){
+    const double deg=int(x);
+    const double min=x-deg;
+    return PI*(deg+5.0*min/3.0)/180.0;
+}
+
 double distGEO(std::vector<double>&u,std::vector<double>&v){
-    double lat1,lng1,lat2,lng2;
-    lat1=PI*(int(u[0])+5.0*(u[0]-int(u[0]))/3.0)*180;
-    lng1=PI*(int(u[1])+5.0*(u[1]-int(u[1]))/3.0)*180;
-    lat2=PI*(int(v[0])+5.0*(v[0]-int(v[0]))/3.0)*180;
-    lng2=PI*(int(v[1])+5.0*(v[1]-int(v[1]))/3.0)*180;
-    
-    double q1=std::cos(lng1-lng2),q2=std::cos(lat1-lat2),q3=std::cos(lat1+lat2);
-    return RRR*acos(0.5*((1.0+q1)*q2-(1.0-q1)*q3))+1.0;
+    const double lat1=geoRad(u[0]),lng1=geoRad(u[1]);
+    const double lat2=geoRad(v[0]),lng2=geoRad(v[1]);
+
+    const double q1=std::cos(lng1-lng2),q2=std::cos(lat1-lat2),q3=std::cos(lat1+lat2);
+    return int(RRR*std::acos(0.5*((1.0+q1)*q2-(1.0-q1)*q3))+1.0);
 }
 
 double distATT(std::vector<double>&u,std::vector<double>&v){
@@ -55,18 +61,42 @@ double distATT(std::vector<double>&u,std::vector<double>&v){
 }
 
 void makeWeightMatrix(problem &X){
-    int i,j;
-    for(i=0;i<X.dimension;i++){
-        for(j=0;j<X.dimension;j++){
-            if(X.WeightType=="EUC_2D")X.W[i][j]=distEUC(X.coord[i],X.coord[j],2);
-            else if(X.WeightType=="EUC_3D")X.W[i][j]=distEUC(X.coord[i],X.coord[j],3);
-            else if(X.WeightType=="MAX_2D")X.W[i][j]=distMAX(X.coord[i],X.coord[j],2);
-            else if(X.WeightType=="MAX_3D")X.W[i][j]=distMAX(X.coord[i],X.coord[j],3);
-            else if(X.WeightType=="MAN_2D")X.W[i][j]=distEUC(X.coord[i],X.coord[j],2);
-            else if(X.WeightType=="MAN_3D")X.W[i][j]=distEUC(X.coord[i],X.coord[j],3);
-            else if(X.WeightType=="CEIL_2D")X.W[i][j]=std::round(distEUC(X.coord[i],X.coord[j],2));
-            else if(X.WeightType=="GEO")X.W[i][j]=distGEO(X.coord[i],X.coord[j]);
-            else if(X.WeightType=="ATT")X.W[i][j]=distATT(X.coord[i],X.coord[j]);
+    const int n=X.dimension;
+    X.W=std::vector<std::vector<double> >(n,std::vector<double>(n,0.0));
+
+    // Resolve the weight type once instead of doing up to nine string
+    // comparisons per cell inside the n^2 loop.
+    enum Code{EUC2,EUC3,MAX2,MAX3,MAN2,MAN3,CEIL2,GEOc,ATTc,NONE};
+    const std::string &t=X.WeightType;
+    Code code=
+        t=="EUC_2D"?EUC2 : t=="EUC_3D"?EUC3 :
+        t=="MAX_2D"?MAX2 : t=="MAX_3D"?MAX3 :
+        t=="MAN_2D"?MAN2 : t=="MAN_3D"?MAN3 :
+        t=="CEIL_2D"?CEIL2 : t=="GEO"?GEOc :
+        t=="ATT"?ATTc : NONE;
+    if(code==NONE)return;
+
+    auto &C=X.coord;
+    // Full row-major fill (sequential writes stay cache-friendly). Symmetry is
+    // deliberately not exploited here: mirroring into W[j][i] is a column write
+    // strided by a whole row and thrashes the cache for large n, costing more
+    // than the halved (cheap) distance evaluations it would save.
+    for(int i=0;i<n;i++){
+        std::vector<double>&Wi=X.W[i];
+        std::vector<double>&Ci=C[i];
+        for(int j=0;j<n;j++){
+            switch(code){
+                case EUC2: Wi[j]=std::round(distEUC(Ci,C[j],2)); break;
+                case EUC3: Wi[j]=std::round(distEUC(Ci,C[j],3)); break;
+                case MAX2: Wi[j]=std::round(distMAX(Ci,C[j],2)); break;
+                case MAX3: Wi[j]=std::round(distMAX(Ci,C[j],3)); break;
+                case MAN2: Wi[j]=std::round(distMAN(Ci,C[j],2)); break;
+                case MAN3: Wi[j]=std::round(distMAN(Ci,C[j],3)); break;
+                case CEIL2:Wi[j]=std::ceil (distEUC(Ci,C[j],2)); break;
+                case GEOc: Wi[j]=distGEO(Ci,C[j]); break;
+                case ATTc: Wi[j]=distATT(Ci,C[j]); break;
+                default:   Wi[j]=0; break;
+            }
         }
     }
 }

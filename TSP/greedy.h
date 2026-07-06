@@ -16,32 +16,36 @@
 namespace TSP{
 
 double greedy(int rout[],problem &X){
-    std::vector<std::pair<int,int> >edges;
+    // Store the edge weight alongside the endpoints so the sort comparator is a
+    // plain double compare instead of two 2-D lookups (X.W[a][b]) per call,
+    // which dominated the O(n^2 log n) sort.
+    struct Edge{double w;int a,b;};
+    std::vector<Edge>edges;
     edges.resize(X.dimension*(X.dimension-1)>>1);
     disjoint_set ds;
     ds.resize(X.dimension);
-    
+
     int i,j,idx=0;
     for(i=0;i<X.dimension;i++){
         for(j=0;j<i;j++){
-            edges[idx++]={j,i};
+            edges[idx++]={X.W[j][i],j,i};
         }
     }
-    
-    std::sort(edges.begin(),edges.end(),[&X](const std::pair<int,int>&a,const std::pair<int,int>&b){
-        return X.W[a.first][a.second]<X.W[b.first][b.second];
+
+    std::sort(edges.begin(),edges.end(),[](const Edge&a,const Edge&b){
+        return a.w<b.w;
     });
-    
+
     idx=0;
     std::vector<std::vector<int> >G;
     G.resize(X.dimension);
     
     for(auto &e:edges){
-        if(G[e.first].size()>=2||G[e.second].size()>=2)continue;
-        if(ds.Disjoint(e.first,e.second)){
-            ds.Union(e.first,e.second);
-            G[e.first].push_back(e.second);
-            G[e.second].push_back(e.first);
+        if(G[e.a].size()>=2||G[e.b].size()>=2)continue;
+        if(ds.Disjoint(e.a,e.b)){
+            ds.Union(e.a,e.b);
+            G[e.a].push_back(e.b);
+            G[e.b].push_back(e.a);
         }
     }
     

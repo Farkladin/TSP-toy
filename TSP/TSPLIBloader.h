@@ -26,16 +26,14 @@ void SetPATH(){
 }
 
 void makeFile(){
-    std::system(("cd "+PATH).c_str());
-    if(access("ALL_tsp.tar.gz",F_OK)==-1){
+    while(access((PATH+"ALL_tsp.tar.gz").c_str(),F_OK)==-1){
         std::cout<<"File path reset required"<<std::endl;
         SetPATH();
     }
-    
-    std::system("mkdir ALL_tsp");
-    std::system("tar -zxvf ALL_tsp.tar.gz -C ALL_tsp");
-    std::system("cd ALL_tsp");
-    std::system("find . -name \'*.gz\' -exec gzip -d {} \\;");
+
+    std::system(("mkdir -p "+PATH+"ALL_tsp").c_str());
+    std::system(("tar -zxvf "+PATH+"ALL_tsp.tar.gz -C "+PATH+"ALL_tsp").c_str());
+    std::system(("find "+PATH+"ALL_tsp -name '*.gz' -exec gzip -d {} \\;").c_str());
 }
 
 void ReadFile(const std::string fileName,problem &X){
